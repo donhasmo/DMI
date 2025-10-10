@@ -3,7 +3,7 @@
 # }
 
 resource "aws_db_subnet_group" "db_subnet_group" {
-  name       = "hasmoent-${var.projectname}-dbsubnet-group-${terraform.workspace}"
+  name       = "${var.projectname}-dbsubnet-group-${terraform.workspace}"
   subnet_ids = var.db_subnet_ids
   tags = var.tags
 }
@@ -33,7 +33,7 @@ resource "aws_db_instance" "mysql_rds" {
 
 # Store the password in Secrets Manager
 resource "aws_secretsmanager_secret" "rds_secret" {
-  name = "my-rds-password-${terraform.workspace}"
+  name = "-${terraform.workspace}"
   tags = var.tags
 }
 
