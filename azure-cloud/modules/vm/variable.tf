@@ -1,6 +1,6 @@
 variable "prefix" {
   type = list(string)
-  default = ["1", "2", "3"]
+  default = ["1", "2"]
 }
 
 variable "network_interface_ids" {
