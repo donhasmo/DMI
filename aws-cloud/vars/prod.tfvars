@@ -1,8 +1,0 @@
-aws_region              = "" 
-S3_bucket_name          = ""
-ec2_key_name            = ""
-projectname             = ""
-dbname                  = ""
-dbpass                  = ""
-dbuser                  = "" 
-ami                     = "" 

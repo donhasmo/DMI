@@ -2,47 +2,38 @@
   
 # }
 
-provider "azurerm" {
-    alias = "eastus"
-    features {
-    }  
-}
-
-
-resource "azurerm_resource_group" "tf_resource_group" {
-    name = "eastus-rg"
-    location = "eastus"
-    provider = azurerm.eastus
-}
-
-# resource "azurerm_resource_group" "westeurope_resource_group" {
-#     name = "westeu-rg"
-#     location = "westeurope"
-#     provider = azurerm.westeurope
-# }
-
-resource "azurerm_storage_account" "tf_storage_account" {
-  name                     = "tfstorageaccountdemo"
-  resource_group_name      = azurerm_resource_group.tf_resource_group.name
-  location                 = azurerm_resource_group.tf_resource_group.location
-  account_tier             = "Standard"
-  account_replication_type = "GRS"
-  provider = azurerm.eastus
-
-  tags = {
-    location = "westus"
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "4.46.0"
+    }
   }
 }
 
-# resource "azurerm_storage_account" "westeurope_storage_account" {
-#   name                     = "westeustorageaccountname"
-#   resource_group_name      = azurerm_resource_group.westeurope_resource_group.name
-#   location                 = azurerm_resource_group.westeurope_resource_group.location
-#   account_tier             = "Standard"
-#   account_replication_type = "GRS"
-#   provider = azurerm.westeurope
+provider "azurerm" {
+  features {}
+  subscription_id = "e0016351-6fec-419f-898c-796cbdf2c69c"
+  use_cli = true
+}
 
-#   tags = {
-#     location = "westeurope"
-#   }
-# }
+module "net" {
+  source = "./modules/net"
+  prefix = var.prefix  
+}
+
+module "vm" {
+  source = "./modules/vm"
+  prefix = var.prefix  
+  network_interface_ids = module.net.network_interface_ids
+  public_ips         = module.net.public_ips
+}
+
+
+
+
+
+
+
+
+
