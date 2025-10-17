@@ -25,7 +25,7 @@ variable "dbuser" {
 }
 
 variable "dbpass" {
-    sensitive = true
+    sensitive = false
 }
 
 variable "projectname" {

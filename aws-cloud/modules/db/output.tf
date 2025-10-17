@@ -7,6 +7,5 @@ output "rds_endpoint" {
 }
 
 output "dbhost" {
-    value = aws_db_instance.mysql_rds.address
-  
+    value = aws_db_instance.mysql_rds.address  
 }

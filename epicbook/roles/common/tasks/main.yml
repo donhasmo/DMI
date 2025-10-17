@@ -1,0 +1,31 @@
+---
+- name: Update and upgrade system
+  apt:
+    update_cache: yes
+    upgrade: yes
+
+- name: Install base packages
+  apt:
+    name:
+      - git
+      - curl
+      - mysql-client
+      - build-essential
+    state: present
+
+- name: Add Node.js 18 repo
+  shell: curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+  args:
+    warn: false
+
+- name: Add NodeSource Node.js 18.x repo
+  shell: curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+  args:
+    warn: false
+
+- name: Install Node.js (includes npm)
+  apt:
+    name: nodejs
+    state: present
+    update_cache: yes
+

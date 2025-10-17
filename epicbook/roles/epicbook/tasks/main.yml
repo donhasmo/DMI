@@ -1,0 +1,72 @@
+---
+- name: Clone EpicBook repo
+  git:
+    repo: "https://github.com/pravinmishraaws/theepicbook.git"
+    dest: "{{ app_dir }}"
+    version: main
+
+- name: Install Node.js dependencies
+  npm:
+    path: "{{ app_dir }}"
+    production: yes
+
+- name: Create environment file
+  copy:
+    dest: "{{ app_dir }}/.env"
+    content: |
+      DB_HOST={{ db_host }}
+      DB_USER={{ db_username }}
+      DB_PASSWORD={{ db_password }}
+      DB_NAME={{ db_name }}
+      DB_PORT=3306
+      NODE_ENV=production
+      PORT=8080
+
+- name: Update config.json
+  copy:
+    dest: "{{ app_dir }}/config/config.json"
+    content: |
+      {
+        "production": {
+          "username": "{{ db_username }}",
+          "password": "{{ db_password }}",
+          "database": "{{ db_name }}",
+          "host": "{{ db_host }}",
+          "dialect": "mysql"
+        }
+      }
+
+- name: Seed database
+  shell: |
+    mysql -h {{ db_host }} -u {{ db_username }} -p{{ db_password }} < db/BuyTheBook_Schema.sql
+    mysql -h {{ db_host }} -u {{ db_username }} -p{{ db_password }} < db/author_seed.sql
+    mysql -h {{ db_host }} -u {{ db_username }} -p{{ db_password }} < db/books_seed.sql
+  args:
+    chdir: "{{ app_dir }}"
+  ignore_errors: yes
+
+- name: Create systemd service for EpicBook
+  copy:
+    dest: /etc/systemd/system/epicbook.service
+    content: |
+      [Unit]
+      Description=EpicBook Backend Service
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      WorkingDirectory={{ app_dir }}
+      ExecStart=/usr/bin/node server.js
+      Restart=on-failure
+      Environment=NODE_ENV=production
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable and start EpicBook service
+  systemd:
+    name: epicbook
+    enabled: yes
+    state: started
+    daemon_reload: yes

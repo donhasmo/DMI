@@ -63,5 +63,38 @@ module "iam_role_policy" {
 }
 
 
+resource "null_resource" "ansible_provision" {
+  triggers = {
+    web_ip      = module.ec2.public_ip
+    db_endpoint = module.db.rds_endpoint
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "[INFO] Exporting Terraform outputs for Ansible..."
+      terraform output -json > ../epicbook/group_vars/web.json
+
+      echo "[web]" > ../epicbook/inventory.ini
+      echo "$(terraform output -raw public_ip) ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_ed25519" >> ../epicbook/inventory.ini
+
+
+      echo "[INFO] Running Ansible playbook..."
+      cd ../epicbook
+      ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory.ini site.yml
+    EOT
+
+    interpreter = ["/bin/bash", "-c"]
+  }
+
+  depends_on = [
+    module.ec2,
+    module.db
+  ]
+}
+
+
+
+
+
 
 
