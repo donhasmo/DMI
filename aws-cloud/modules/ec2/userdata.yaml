@@ -12,8 +12,11 @@ packages:
 runcmd:
   - |
     # Install Node.js 18
-    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-    apt-get install -y nodejs npm
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+    apt-get install -y nodejs
+    node -v
+    npm -v
+
     
     # Clone EpicBook
     git clone https://github.com/pravinmishraaws/theepicbook.git /opt/epicbook
@@ -34,7 +37,7 @@ runcmd:
     EOF
     
     # Update config.json with correct database settings
-    cat > config/config.json << 'CONFIGJSON'
+    cat > config/config.json << EOF
     {
       "development": {
         "username": "${db_username}",
@@ -58,13 +61,13 @@ runcmd:
         "dialect": "mysql"
       }
     }
-    CONFIGJSON
+    EOF
     
     # Import SQL seed files to populate database with books
     echo "Importing database schema and seed data..."
-    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/BuyTheBook_Schema.sql
-    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/author_seed.sql
-    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/books_seed.sql
+    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/BuyTheBook_Schema.sql || true
+    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/author_seed.sql || true
+    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/books_seed.sql || true
     
     # Setup nginx as reverse proxy
     cat > /etc/nginx/sites-available/epicbook << 'NGINXCFG'
@@ -112,6 +115,7 @@ runcmd:
     ExecStart=/usr/bin/node server.js
     Restart=on-failure
     Environment=NODE_ENV=production
+    EnvironmentFile=/opt/epicbook/.env
 
     [Install]
     WantedBy=multi-user.target
@@ -120,12 +124,13 @@ runcmd:
     # Start services
     systemctl daemon-reload
     systemctl enable epicbook.service
+    systemctl start epicbook.service
     
     # Wait for database
     sleep 30
     
     # Start the application
-    systemctl start epicbook.service
+    systemctl status epicbook.service || true
     
     # Final status check
     echo "=== Deployment Status ==="

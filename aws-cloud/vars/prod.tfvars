@@ -1,4 +1,4 @@
-env                     = "dev"
+# env                     = "prod"
 aws_region              = "us-west-1" 
 S3_bucket_name          = "hasmoent-s3"
 ec2_key_name            = "n-cali"
