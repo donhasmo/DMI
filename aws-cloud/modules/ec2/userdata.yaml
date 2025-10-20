@@ -3,137 +3,59 @@ package_update: true
 package_upgrade: true
 
 packages:
-  - nginx
   - git
-  - mysql-client
   - curl
-  - build-essential
+  - nginx
+  - nodejs
+  - npm
 
 runcmd:
   - |
-    # Install Node.js 18
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-    apt-get install -y nodejs
-    node -v
-    npm -v
+    echo "=== STEP 1: Verify Node.js and npm installation ==="
+    node -v || apt install -y nodejs
+    npm -v || apt install -y npm
 
-    
-    # Clone EpicBook
-    git clone https://github.com/pravinmishraaws/theepicbook.git /opt/epicbook
-    cd /opt/epicbook
-    
-    # Install dependencies
+    echo "=== STEP 2: Start and enable Nginx ==="
+    systemctl start nginx
+    systemctl enable nginx
+    systemctl status nginx --no-pager
+
+    echo "=== STEP 3: Clone React app from GitHub ==="
+    cd /tmp
+    git clone https://github.com/pravinmishraaws/my-react-app.git
+    cd my-react-app
+
+    echo "=== STEP 4: Modify App.js ==="
+    sed -i 's|<h2>.*</h2>|<h2>Deployed by: <strong>Your Full Name</strong></h2>|' src/App.js
+    sed -i 's|<p>.*</p>|<p>Date: <strong>DD/MM/YYYY</strong></p>|' src/App.js
+
+    echo "=== STEP 5: Install dependencies and build React app ==="
     npm install
-    
-    # Create environment file
-    cat > .env << EOF
-    DB_HOST=${db_host}
-    DB_USER=${db_username}
-    DB_PASSWORD=${db_password}
-    DB_NAME=bookstore
-    DB_PORT=3306
-    NODE_ENV=production
-    PORT=8080
-    EOF
-    
-    # Update config.json with correct database settings
-    cat > config/config.json << EOF
-    {
-      "development": {
-        "username": "${db_username}",
-        "password": "${db_password}",
-        "database": "bookstore",
-        "host": "${db_host}",
-        "dialect": "mysql"
-      },
-      "test": {
-        "username": "${db_username}",
-        "password": "${db_password}",
-        "database": "bookstore",
-        "host": "${db_host}",
-        "dialect": "mysql"
-      },
-      "production": {
-        "username": "${db_username}",
-        "password": "${db_password}",
-        "database": "bookstore",
-        "host": "${db_host}",
-        "dialect": "mysql"
-      }
-    }
-    EOF
-    
-    # Import SQL seed files to populate database with books
-    echo "Importing database schema and seed data..."
-    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/BuyTheBook_Schema.sql || true
-    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/author_seed.sql || true
-    mysql -h ${db_host} -u ${db_username} -p${db_password} < db/books_seed.sql || true
-    
-    # Setup nginx as reverse proxy
-    cat > /etc/nginx/sites-available/epicbook << 'NGINXCFG'
+    npm run build
+
+    echo "=== STEP 6: Deploy build to Nginx web root ==="
+    rm -rf /var/www/html/*
+    cp -r build/* /var/www/html/
+    chown -R www-data:www-data /var/www/html
+    chmod -R 755 /var/www/html
+
+    echo "=== STEP 7: Configure Nginx for React ==="
+    cat > /etc/nginx/sites-available/default << 'EOF'
     server {
         listen 80;
         server_name _;
 
-        # Reverse proxy to Node.js app
+        root /var/www/html;
+        index index.html;
+
         location / {
-            proxy_pass http://localhost:8080;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection 'upgrade';
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_cache_bypass $http_upgrade;
+            try_files $uri /index.html;
         }
 
-        # Serve static files directly
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-            root /opt/epicbook/public;
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
+        error_page 404 /index.html;
     }
-    NGINXCFG
-    
-    # Enable site
-    ln -sf /etc/nginx/sites-available/epicbook /etc/nginx/sites-enabled/
-    rm -f /etc/nginx/sites-enabled/default
-    systemctl restart nginx
-    
-    # Create systemd service
-    cat > /etc/systemd/system/epicbook.service << 'EOF'
-    [Unit]
-    Description=EpicBook Backend Service
-    After=network.target
-
-    [Service]
-    Type=simple
-    User=root
-    WorkingDirectory=/opt/epicbook
-    ExecStart=/usr/bin/node server.js
-    Restart=on-failure
-    Environment=NODE_ENV=production
-    EnvironmentFile=/opt/epicbook/.env
-
-    [Install]
-    WantedBy=multi-user.target
     EOF
-    
-    # Start services
-    systemctl daemon-reload
-    systemctl enable epicbook.service
-    systemctl start epicbook.service
-    
-    # Wait for database
-    sleep 30
-    
-    # Start the application
-    systemctl status epicbook.service || true
-    
-    # Final status check
-    echo "=== Deployment Status ==="
-    systemctl status nginx
-    systemctl status epicbook.service
-    echo "========================="
+
+    systemctl restart nginx
+
+    echo "=== Deployment Complete! React app is live on port 80 ==="
