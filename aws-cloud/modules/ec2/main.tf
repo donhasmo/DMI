@@ -5,7 +5,7 @@ resource "aws_instance" "my_ec2" {
   subnet_id              = var.epicbook_pubsub_id
   vpc_security_group_ids = var.pub_sg_id
   associate_public_ip_address = true
-  user_data              = data.template_file.userdata.rendered
+  user_data_base64             = data.template_file.userdata.rendered
   tags                   = var.tags
 }
 
