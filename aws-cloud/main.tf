@@ -4,7 +4,7 @@ locals {
   environment    = terraform.workspace == "prod" ? "prod" : "dev"
   aws_account    = data.aws_caller_identity.current.account_id
   aws_user_id    = data.aws_caller_identity.current.user_id
-  S3_bucket_name = var.S3_bucket_name
+  # S3_bucket_name = var.S3_bucket_name
   ec2_key_name   = var.ec2_key_name
   tags = {
     env      = local.environment

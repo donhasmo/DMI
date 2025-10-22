@@ -7,13 +7,17 @@ packages:
   - git
   - mysql-client
   - curl
+  - nodejs
+  - npm
   - build-essential
 
 runcmd:
   - |
     # Install Node.js 18
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-    apt-get install -y nodejs
+    node -v || apt install -y nodejs
+    npm -v || apt install -y npm
+    # curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+    # apt-get install -y nodejs
     node -v
     npm -v
 
