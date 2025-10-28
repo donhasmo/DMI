@@ -2,8 +2,8 @@ resource "azurerm_virtual_network" "main" {
   # for_each = toset(var.prefix)
   name                = "network"
   address_space       = ["10.0.0.0/16"]
-  location            = "eastus"
-  resource_group_name = "eastus-rg"
+  location            = "${var.location}"
+  resource_group_name = "${var.rg_name}"
 }
 
 resource "azurerm_subnet" "internal" {
@@ -17,8 +17,8 @@ resource "azurerm_subnet" "internal" {
 resource "azurerm_network_interface" "main" {
   for_each = toset(var.prefix)
   name                = "${each.value}-nic"
-  location            = "eastus"
-  resource_group_name = "eastus-rg"
+  location            = "${var.location}"
+  resource_group_name = "${var.rg_name}"
 
   ip_configuration {
     name                          = "testconfiguration1-${each.value}"
@@ -31,8 +31,8 @@ resource "azurerm_network_interface" "main" {
 resource "azurerm_public_ip" "main" {
   for_each            = toset(var.prefix)
   name                = "${each.value}-publicip"
-  location            = "eastus"
-  resource_group_name = "eastus-rg"
+  location            = "${var.location}"
+  resource_group_name = "${var.rg_name}"
   allocation_method   = "Static"
   sku                 = "Standard"
 }
@@ -41,8 +41,8 @@ resource "azurerm_network_security_group" "main" {
   for_each = toset(var.prefix)
 
   name                = "${each.value}-nsg"
-  location            = "eastus"
-  resource_group_name = "eastus-rg"
+  location            = "${var.location}"
+  resource_group_name = "${var.rg_name}"
 
   security_rule {
     name                       = "Allow-SSH"

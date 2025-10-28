@@ -11,3 +11,11 @@ variable "network_interface_ids" {
 variable "public_ips" {
   type = map(string)
 }
+
+variable "rg_name" {
+  type = string 
+}
+
+variable "location" {
+  type = string  
+}

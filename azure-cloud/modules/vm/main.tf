@@ -1,8 +1,8 @@
 resource "azurerm_virtual_machine" "main" {
   for_each = toset(var.prefix)
   name                  = "${each.value}-vm"
-  location              = "eastus"
-  resource_group_name   = "eastus-rg"
+  location            = "${var.location}"
+  resource_group_name = "${var.rg_name}"
   network_interface_ids = [var.network_interface_ids[each.value]]
   vm_size               = "Standard_B1s"
 

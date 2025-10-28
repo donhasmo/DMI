@@ -20,6 +20,8 @@ provider "azurerm" {
 module "net" {
   source = "./modules/net"
   prefix = var.prefix  
+  rg_name = var.rg_name
+  location = var.location
 }
 
 module "vm" {
@@ -27,6 +29,8 @@ module "vm" {
   prefix = var.prefix  
   network_interface_ids = module.net.network_interface_ids
   public_ips         = module.net.public_ips
+  rg_name = var.rg_name
+  location = var.location
 }
 
 
