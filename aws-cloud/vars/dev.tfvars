@@ -1,6 +1,4 @@
-# env                     = "dev"
 aws_region              = "us-east-1" 
-S3_bucket_name          = "hasmoent-s3"
 ec2_key_name            = "n-virg"
 projectname             = "epicbook"
 dbname                  = "bookstore"

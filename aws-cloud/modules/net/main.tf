@@ -77,7 +77,7 @@ resource "aws_security_group" "private_sg" {
   vpc_id      = aws_vpc.epicbook_vpc.id # Replace with your VPC ID, or remove if using default VPC
 
   ingress {
-    description = "SSH"
+    description = "database"
     from_port   = 3306
     to_port     = 3306
     protocol    = "tcp"
