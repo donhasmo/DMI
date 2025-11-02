@@ -1,3 +1,0 @@
-# variable "provider" {
-#    type = string 
-# }

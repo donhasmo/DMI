@@ -1,0 +1,19 @@
+trigger:
+- azure-devops-demo
+
+pool:
+  name: 'linux-hosted-agent'   
+
+steps:
+- script: |
+    echo "Running on Self-Hosted Agent"
+    echo "=============================="
+    echo "System Info:"
+    uname -a
+    echo ""
+    echo "Current User:"
+    whoami
+    echo ""
+    echo "Disk Usage:"
+    df -h
+  displayName: 'Verify Self-Hosted Agent'
