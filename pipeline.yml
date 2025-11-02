@@ -2,18 +2,16 @@ trigger:
 - azure-devops-demo
 
 pool:
-  name: 'linux-hosted-agent'   
+  name: linux-hosted-agent
 
 steps:
+- script: echo Hello, world!
+  displayName: 'Run a one-line script'
+
 - script: |
-    echo "Running on Self-Hosted Agent"
-    echo "=============================="
-    echo "System Info:"
+    echo Hello, world!
     uname -a
-    echo ""
-    echo "Current User:"
     whoami
-    echo ""
-    echo "Disk Usage:"
     df -h
-  displayName: 'Verify Self-Hosted Agent'
+
+  displayName: 'Run a multi-line script'
