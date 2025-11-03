@@ -1,4 +1,10 @@
 terraform {
-  backend "s3" {
+  backend "local" {   
   }
 }
+
+# terraform {
+#   backend "s3" {   
+#   }
+# }
+
