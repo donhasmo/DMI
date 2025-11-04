@@ -5,6 +5,7 @@ resource "aws_instance" "my_ec2" {
   subnet_id              = var.react_pubsub_id
   vpc_security_group_ids = var.pub_sg_id
   associate_public_ip_address = true
+  availability_zone = "us-east-1a"
   user_data_base64             = data.template_file.userdata.rendered
   tags                   = var.tags
   depends_on = [aws_key_pair.dev_key]
