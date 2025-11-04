@@ -1,0 +1,69 @@
+# azure-pipelines.yml
+# Purpose: Deploy index.html to remote NGINX web root via SSH
+
+trigger:
+  - main
+
+pool:
+  name: "linux-hosted-agent"   # Your custom agent pool (from Assignment 38)
+
+variables:
+  sshService: 'ssh-to-nginx-vm'    # Name of SSH service connection in Azure DevOps
+  webRoot: '/var/www/html'         # Deployment target directory on the VM
+
+stages:
+  - stage: DeployHTML
+    displayName: 'Deploy HTML Page to Remote VM'
+    jobs:
+      - job: Deploy
+        displayName: 'Copy index.html to NGINX web root'
+
+        steps:
+          # Step 1 — Checkout code
+          - checkout: self
+            displayName: 'Checkout repository'
+
+          # Step 2 — Prepare web root permissions
+          - task: SSH@0
+            displayName: 'Set secure permissions for web root'
+            inputs:
+              sshEndpoint: '$(sshService)'
+              runOptions: 'inline'
+              inline: |
+                echo "Setting permissions for $(webRoot)..."
+                sudo usermod -aG www-data $(whoami)
+                sudo chown -R www-data:www-data $(webRoot)
+                sudo chmod -R 775 $(webRoot)
+
+          # Step 3 — Copy file(s) to the target VM
+          - task: CopyFilesOverSSH@0
+            displayName: 'Copy index.html to VM'
+            inputs:
+              sshEndpoint: '$(sshService)'
+              sourceFolder: '$(Build.SourcesDirectory)'
+              contents: 'index.html'
+              targetFolder: '$(webRoot)'
+
+          # Step 4 — Restart NGINX remotely
+          - task: SSH@0
+            displayName: 'Restart NGINX on VM'
+            inputs:
+              sshEndpoint: '$(sshService)'
+              runOptions: 'inline'
+              inline: |
+                echo "Restarting NGINX service..."
+                sudo systemctl restart nginx
+                sudo systemctl status nginx --no-pager
+                echo "Deployment complete. Visit your VM's public IP to verify."
+          
+          - task: SSH@0
+            displayName: 'Verify that deployment succeeded'
+            inputs:
+              sshEndpoint: '$(sshService)'
+              runOptions: 'inline'
+              inline: |
+                echo "Checking if index.html exists in $(webRoot)..."
+                ls -l $(webRoot)
+                echo "Testing NGINX response..."
+                curl -I http://localhost | grep "200 OK" || (echo "NGINX not serving site correctly" && exit 1)
+                echo "Verification successful — static site deployed!"
