@@ -26,13 +26,13 @@ resource "azurerm_virtual_machine" "main" {
   }
   os_profile {
     computer_name  = "hostname"
-    admin_username = "testadmin"
+    admin_username = "hassan"
     # admin_password = "Password1234!"
   }
   os_profile_linux_config {
     disable_password_authentication = true
     ssh_keys {
-    path     = "/home/testadmin/.ssh/authorized_keys"
+    path     = "/home/hassan/.ssh/authorized_keys"
     key_data = file("~/.ssh/id_ed25519.pub")
   }
   }
