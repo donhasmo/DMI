@@ -12,20 +12,34 @@ users:
   - default
   - name: hassan
     sudo: ALL=(ALL) NOPASSWD:ALL
-    groups: sudo
+    groups: sudo,www-data
     shell: /bin/bash
     lock_passwd: false
     passwd: "$6$l8ldU1S4x8oTZxpW$peSSywxMYoqLuunobJ6bG8cSmk0gigNZZVJRimmN7nW6pqPz./I6WfQsL1x67AJVpfuQC/t9R2cT1mNdyhcTZ." 
 
 runcmd:
-  |
-  - echo "Enabling password auth for SSH..."
-  - sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-  - sed -i 's/^#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
-  - systemctl enable ssh
-  - systemctl restart ssh
+  - |
+    echo "=== STEP 1: Enable password auth for SSH ==="
+    sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    sed -i 's/^#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
+    systemctl enable ssh
+    systemctl restart ssh
 
-  - echo "=== STEP 2: Start and enable Nginx ==="
-  - systemctl start nginx
-  - systemctl enable nginx
-  - systemctl status nginx --no-pager
+  - |
+    echo "=== STEP 2: Start and enable Nginx ==="
+    systemctl enable nginx
+    systemctl start nginx
+
+  - |
+    echo "=== STEP 3: Set permissions for CI/CD deploys ==="
+    mkdir -p /var/www/html
+    chown -R hassan:www-data /var/www/html
+    chmod -R 2775 /var/www/html
+    find /var/www/html -type d -exec chmod 2775 {} \;
+    find /var/www/html -type f -exec chmod 664 {} \;
+
+
+  - |
+    echo "=== STEP 4: Verify Nginx and permissions ==="
+    systemctl status nginx --no-pager
+    ls -ld /var/www/html
