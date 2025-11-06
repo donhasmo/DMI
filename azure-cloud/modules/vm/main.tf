@@ -27,7 +27,8 @@ resource "azurerm_virtual_machine" "main" {
   os_profile {
     computer_name  = "hostname"
     admin_username = "hassan"
-    # admin_password = "Password1234!"
+    admin_password = "@Mynameisdonhasmo1"
+    custom_data    = base64encode(file("${path.module}/userdata.yml"))
   }
   os_profile_linux_config {
     disable_password_authentication = true

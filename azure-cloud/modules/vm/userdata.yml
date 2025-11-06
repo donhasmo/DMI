@@ -1,0 +1,31 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+ssh_pwauth: true
+
+packages:
+  - git
+  - curl
+  - nginx
+
+users:
+  - default
+  - name: hassan
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: sudo
+    shell: /bin/bash
+    lock_passwd: false
+    passwd: "$6$l8ldU1S4x8oTZxpW$peSSywxMYoqLuunobJ6bG8cSmk0gigNZZVJRimmN7nW6pqPz./I6WfQsL1x67AJVpfuQC/t9R2cT1mNdyhcTZ." 
+
+runcmd:
+  |
+  - echo "Enabling password auth for SSH..."
+  - sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
+  - systemctl enable ssh
+  - systemctl restart ssh
+
+  - echo "=== STEP 2: Start and enable Nginx ==="
+  - systemctl start nginx
+  - systemctl enable nginx
+  - systemctl status nginx --no-pager
