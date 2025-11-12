@@ -1,61 +1,19 @@
 #cloud-config
 package_update: true
 package_upgrade: true
-
 packages:
-  - git
+  - apt-transport-https
+  - ca-certificates
   - curl
-  - nginx
-  - nodejs
-  - npm
+  - gnupg
+  - lsb-release
 
 runcmd:
-  - |
-    echo "=== STEP 1: Verify Node.js and npm installation ==="
-    node -v || apt install -y nodejs
-    npm -v || apt install -y npm
-
-    echo "=== STEP 2: Start and enable Nginx ==="
-    systemctl start nginx
-    systemctl enable nginx
-    systemctl status nginx --no-pager
-
-    echo "=== STEP 3: Clone React app from GitHub ==="
-    cd /tmp
-    git clone https://github.com/pravinmishraaws/my-react-app.git
-    cd my-react-app
-
-    echo "=== STEP 4: Modify App.js ==="
-    sed -i 's|<h2>.*</h2>|<h2>Deployed by: <strong>Your Full Name</strong></h2>|' src/App.js
-    sed -i 's|<p>.*</p>|<p>Date: <strong>DD/MM/YYYY</strong></p>|' src/App.js
-
-    echo "=== STEP 5: Install dependencies and build React app ==="
-    npm install
-    npm run build
-
-    echo "=== STEP 6: Deploy build to Nginx web root ==="
-    rm -rf /var/www/html/*
-    cp -r build/* /var/www/html/
-    chown -R www-data:www-data /var/www/html
-    chmod -R 755 /var/www/html
-
-    echo "=== STEP 7: Configure Nginx for React ==="
-    cat > /etc/nginx/sites-available/default << 'EOF'
-    server {
-        listen 80;
-        server_name _;
-
-        root /var/www/html;
-        index index.html;
-
-        location / {
-            try_files $uri /index.html;
-        }
-
-        error_page 404 /index.html;
-    }
-    EOF
-
-    systemctl restart nginx
-
-    echo "=== Deployment Complete! React app is live on port 80 ==="
+  # Install Docker (Ubuntu repo is fine for this lab)
+  - apt-get update -y
+  - apt-get install -y docker.io
+  - systemctl enable docker
+  - systemctl start docker
+  - usermod -aG docker ubuntu || true  # change user if different
+  - newgrp docker <<EOF echo "Docker ready"
+   EOF
