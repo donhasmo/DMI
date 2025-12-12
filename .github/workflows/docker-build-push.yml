@@ -60,104 +60,102 @@ jobs:
         id: set-matrix
         run: |
           # Build matrix JSON from inputs (robust: accepts newline OR space separated lists)
+          # Build matrix JSON from inputs (robust: accepts newline OR space separated lists)
           set -euo pipefail
 
-          # inputs (in workflow these are available at github.event.inputs.*)
-          INPUT_PATHS="${{ github.event.inputs.paths }}" || true
-          INPUT_IMAGES="${{ github.event.inputs.images }}" || true
-          REGISTRY="${{ github.event.inputs.registry }}" || true
+          # inputs (replace these with github.event.inputs.* in the workflow)
+          INPUT_PATHS="${{ github.event.inputs.paths }}"    # e.g. "backend/ frontend/" or "backend\ndefault/"
+          INPUT_IMAGES="${{ github.event.inputs.images }}"  # e.g. "hasmo/backend:test hasmo/frontend:test"
+          REGISTRY="${{ github.event.inputs.registry }}"    # e.g. docker.io
           CLONE_DIR="${CLONE_DIR:-repo-src}"
 
-          # If REGISTRY empty, default to docker.io
+          # default registry
           REGISTRY="${REGISTRY:-docker.io}"
 
-          # Helper: normalize separators -> convert sequences of whitespace to a single newline
-          # This allows callers to provide either newline-separated or space-separated lists
+          # Helper: normalize separators -> convert whitespace (spaces/tabs/newlines) into single newline list
           normalize_list() {
-          local raw="$1"
-          # replace CRLF with LF
-          raw="${raw//$'\r'/}"
-          # if raw contains any newline, keep those separators; otherwise split on spaces
-          if printf '%s' "$raw" | grep -q $'\n'; then
-            # collapse multiple blank lines to single newline, trim leading/trailing newlines
-            printf '%s' "$raw" | sed '/^[[:space:]]*$/d'
-          else
-            # split on whitespace into newlines
-            printf '%s' "$raw" | tr -s '[:space:]' '\n' | sed '/^[[:space:]]*$/d'
-          fi
+            local raw="$1"
+            # strip CRs
+            raw="${raw//$'\r'/}"
+            # if contains newline, keep lines; otherwise split on whitespace
+            if printf '%s' "$raw" | grep -q $'\n'; then
+              # remove empty lines, trim leading/trailing whitespace per line
+              printf '%s\n' "$raw" | sed '/^[[:space:]]*$/d'
+            else
+              # split on whitespace into lines
+              printf '%s\n' "$raw" | tr -s '[:space:]' '\n' | sed '/^[[:space:]]*$/d'
+            fi
           }
 
-          # Normalize inputs to arrays (one item per line)
+          # Normalize inputs
           PATH_LINES_RAW="$(normalize_list "$INPUT_PATHS")"
           IMAGE_LINES_RAW="$(normalize_list "$INPUT_IMAGES")"
 
-          # Build arrays
-          IFS=$'\n' read -r -d '' -a PATH_LINES <<< "$(printf '%s\n' "$PATH_LINES_RAW")" || true
-          IFS=$'\n' read -r -d '' -a IMAGE_LINES <<< "$(printf '%s\n' "$IMAGE_LINES_RAW")" || true
+          # Read into arrays using mapfile for robust splitting
+          mapfile -t PATH_LINES <<< "$PATH_LINES_RAW" || true
+          mapfile -t IMAGE_LINES <<< "$IMAGE_LINES_RAW" || true
 
-          # Trim function
+          # Trim helper (bash)
           trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' <<< "$1"; }
 
-          # Clean up paths (remove trailing slashes) and images (trim)
+          # Clean and normalize paths/images
           clean_paths=()
           for p in "${PATH_LINES[@]}"; do
-          p="$(trim "$p")"
-          # if empty skip
-          [ -z "$p" ] && continue
-          # remove trailing slash(s)
-          p="${p%/}"
-          clean_paths+=("$p")
+            p="$(trim "$p")"
+            [ -z "$p" ] && continue
+            # remove trailing slash(es)
+            p="${p%/}"
+            clean_paths+=("$p")
           done
 
           clean_images=()
           for img in "${IMAGE_LINES[@]}"; do
-          img="$(trim "$img")"
-          [ -z "$img" ] && continue
-          clean_images+=("$img")
+            img="$(trim "$img")"
+            [ -z "$img" ] && continue
+            clean_images+=("$img")
           done
 
-          # Verify counts
+          # Verify counts match
           if [ "${#clean_paths[@]}" -ne "${#clean_images[@]}" ]; then
-          echo "Error: number of paths (${#clean_paths[@]}) and images (${#clean_images[@]}) must match"
-          echo "Paths (${#clean_paths[@]}):"
-          printf ' - %s\n' "${clean_paths[@]}"
-          echo "Images (${#clean_images[@]}):"
-          printf ' - %s\n' "${clean_images[@]}"
-          exit 1
-          fi
-
-          # Build matrix items
-          matrix_items=()
-          for i in "${!clean_paths[@]}"; do
-          p="${clean_paths[$i]}"
-          img="${clean_images[$i]}"
-
-          # ensure folder exists in cloned repo
-          if [ ! -d "$CLONE_DIR/$p" ]; then
-            echo "Error: path '$p' does not exist in cloned repo ($CLONE_DIR)"
-            echo "Listing $CLONE_DIR:"
-            ls -la "$CLONE_DIR" | sed -n '1,200p'
+            echo "Error: number of paths (${#clean_paths[@]}) and images (${#clean_images[@]}) must match"
+            echo "Paths (${#clean_paths[@]}):"
+            printf ' - %s\n' "${clean_paths[@]}"
+            echo "Images (${#clean_images[@]}):"
+            printf ' - %s\n' "${clean_images[@]}"
             exit 1
           fi
 
-          # if image doesn't include a slash (likely no registry/user), prefix with registry (registry/user/image)
-          if [[ "$img" != */* ]]; then
-            reg="${REGISTRY%/}"
-            img="${reg}/${img}"
-          fi
+          # Build matrix JSON
+          matrix_items=()
+          for i in "${!clean_paths[@]}"; do
+            p="${clean_paths[$i]}"
+            img="${clean_images[$i]}"
 
-          # produce JSON object
-          item=$(jq -n --arg path "$p" --arg image "$img" '{path:$path, image:$image}')
-          matrix_items+=("$item")
+            # ensure path exists in cloned repo
+            if [ ! -d "$CLONE_DIR/$p" ]; then
+              echo "Error: path '$p' does not exist in cloned repo ($CLONE_DIR)"
+              echo "Listing $CLONE_DIR:"
+              ls -la "$CLONE_DIR" | sed -n '1,200p'
+              exit 1
+            fi
+
+            # if image doesn't contain a '/', prefix registry (e.g. docker.io)
+            if [[ "$img" != */* ]]; then
+              reg="${REGISTRY%/}"
+              img="${reg}/${img}"
+            fi
+
+            item=$(jq -n --arg path "$p" --arg image "$img" '{path:$path, image:$image}')
+            matrix_items+=("$item")
           done
 
-          # join into array JSON
-          # matrix_items contains JSON objects as strings; assemble into array with jq
+          # assemble JSON array
           matrix_json="$(printf '%s\n' "${matrix_items[@]}" | jq -s '.')" || true
 
-          # Output matrix for GitHub Actions
+          # export for GitHub Actions
           echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
           echo "matrix prepared: $matrix_json"
+
 
 
       - name: Upload repo as artifact
