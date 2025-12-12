@@ -1,163 +1,148 @@
-name: Build and push Dockerfiles
+name: Build & Push Dockerfiles
 
 on:
   workflow_dispatch:
     inputs:
-      dockerfile_urls:
-        description: |
-          Newline-separated GitHub file URLs to Dockerfiles.
-          Example:
-          https://github.com/OWNER/REPO/blob/main/path/to/Dockerfile
-          https://github.com/OWNER/REPO2/blob/main/Dockerfile
+      repo_url:
+        description: 'Git repo URL (HTTPS). Example: https://github.com/owner/repo.git'
         required: true
-        type: string
-      image_tags:
-        description: |
-          Newline-separated image names (with tags) in same order as URLs.
-          Example:
-          myorg/image1:latest
-          myorg/image2:staging
-        required: true
-        type: string
+      repo_token:
+        description: '(optional) Token to access private repo (use a secret). If empty public access used'
+        required: false
       registry:
-        description: "Docker registry (default docker.io or include hostname like ghcr.io)"
+        description: 'Docker registry host (optional). Example: docker.io or ghcr.io'
         required: false
-        default: "docker.io"
-      force_pull:
-        description: "Set to 'true' to run 'git fetch' for each repo (default false)"
-        required: false
-        default: "false"
+        default: 'docker.io'
+      paths:
+        description: |
+          Newline-separated list of folders that contain Dockerfile(s) relative to repo root.
+          Example:
+          book-review-app/backend
+          book-review-app/frontend
+        required: true
+      images:
+        description: |
+          Newline-separated list of image names (each item corresponds to a path line).
+          Each entry should include the tag. Examples:
+          myuser/backend:staging
+          myuser/frontend:staging
+          If the image name does not contain a '/', the workflow will prefix it with the registry input.
+        required: true
 
 env:
-  # workspace directory where repos will be cloned
-  WORKDIR: ${{ github.workspace }}/repos
+  CLONE_DIR: repo-src
 
 jobs:
-  build-and-push:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      artifact-name: repo-src
     steps:
-      - name: Prepare workspace
+      - name: Install jq (for json handling)
+        run: sudo apt-get update && sudo apt-get install -y jq git
+
+      - name: Clone target repo
+        id: clone
         run: |
-          mkdir -p "${WORKDIR}"
-          echo "workdir=${WORKDIR}"
+          echo "Cloning ${GITHUB_EVENT_INPUTS_repo_url:-${{ github.event.inputs.repo_url }}}"
+          REPO_URL="${{ github.event.inputs.repo_url }}"
+          # Use repo_token if provided
+          if [ -n "${{ github.event.inputs.repo_token }}" ]; then
+            # insert token into URL for private repo access
+            # repo_token should be stored as a secret when dispatching (if necessary)
+            REPO_URL="${REPO_URL/https:\/\//https:\/\/${{ github.event.inputs.repo_token }}@}"
+          fi
+          git clone --depth 1 "$REPO_URL" "$CLONE_DIR"
+          echo "cloned to $CLONE_DIR"
 
-      - name: Set up QEMU and Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log into registry
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ github.event.inputs.registry || env.REGISTRY || 'docker.io' }}
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_PASS }}
-
-      - name: Build and push each Dockerfile
-        id: build_push
+      - name: Build matrix JSON from inputs
+        id: set-matrix
         run: |
-          set -euo pipefail
-          # Inputs
-          DOCKERFILE_URLS="${{ github.event.inputs.dockerfile_urls }}"
-          IMAGE_TAGS="${{ github.event.inputs.image_tags }}"
-          REGISTRY="${{ github.event.inputs.registry || 'docker.io' }}"
-          FORCE_PULL="${{ github.event.inputs.force_pull || 'false' }}"
+          # read newline-separated inputs into arrays
+          IFS=$'\n' read -d '' -r -a PATH_LINES <<< "${{ github.event.inputs.paths }}" || true
+          IFS=$'\n' read -d '' -r -a IMAGE_LINES <<< "${{ github.event.inputs.images }}" || true
 
-          # Normalize newlines -> arrays (strip empty lines)
-          mapfile -t URLS < <(printf '%s\n' "$DOCKERFILE_URLS" | awk 'NF')
-          mapfile -t TAGS < <(printf '%s\n' "$IMAGE_TAGS" | awk 'NF')
-
-          if [ "${#URLS[@]}" -ne "${#TAGS[@]}" ]; then
-            echo "❌ Number of dockerfile URLs (${#URLS[@]}) does not match number of image tags (${#TAGS[@]})."
+          if [ "${#PATH_LINES[@]}" -ne "${#IMAGE_LINES[@]}" ]; then
+            echo "Error: number of paths (${#PATH_LINES[@]}) and images (${#IMAGE_LINES[@]}) must match"
             exit 1
           fi
 
-          echo "Found ${#URLS[@]} pairs to build."
+          REGISTRY="${{ github.event.inputs.registry }}"
+          matrix_items=()
 
-          idx=0
-          for url in "${URLS[@]}"; do
-            tag="${TAGS[idx]}"
-            echo
-            echo "====> Processing #$((idx+1)): ${url} -> ${tag}"
-            # Example URL forms to handle:
-            # https://github.com/OWNER/REPO/blob/BRANCH/path/to/Dockerfile
-            # https://github.com/OWNER/REPO/raw/BRANCH/path/to/Dockerfile
-            # https://github.com/OWNER/REPO/path/to/Dockerfile  (rare)
-            #
-            # Parse owner/repo/branch/path
-            url_no_query=$(echo "$url" | sed 's#\?.*$##')
-            # remove trailing slash
-            url_no_query=${url_no_query%/}
+          for i in "${!PATH_LINES[@]}"; do
+            p="$(echo "${PATH_LINES[$i]}" | sed 's/^ *//;s/ *$//')"
+            img="$(echo "${IMAGE_LINES[$i]}" | sed 's/^ *//;s/ *$//')"
 
-            # extract path segments
-            # break into parts after github.com/
-            after_github=$(echo "$url_no_query" | sed -E 's#https?://github\.com/##')
-            if [ "$after_github" = "$url_no_query" ]; then
-              echo "Unsupported URL (not a github.com URL): $url"
+            # if image doesn't include a slash (likely no registry/user), prefix with registry
+            if [[ "$img" != */* ]]; then
+              # ensure registry doesn't end with '/'
+              reg="${REGISTRY%/}"
+              img="${reg}/${img}"
+            fi
+
+            # ensure path exists
+            if [ ! -d "$CLONE_DIR/$p" ]; then
+              echo "Error: path '$p' does not exist in cloned repo"
               exit 1
             fi
 
-            # if URL contains /blob/ or /raw/, use that to find branch
-            if echo "$after_github" | grep -q '/blob/' ; then
-              owner_repo=$(echo "$after_github" | cut -d'/' -f1,2)
-              branch=$(echo "$after_github" | cut -d'/' -f4)
-              path_in_repo=$(echo "$after_github" | cut -d'/' -f5-)
-            elif echo "$after_github" | grep -q '/raw/' ; then
-              owner_repo=$(echo "$after_github" | cut -d'/' -f1,2)
-              branch=$(echo "$after_github" | cut -d'/' -f4)
-              path_in_repo=$(echo "$after_github" | cut -d'/' -f5-)
-            else
-              # fallback: assume form OWNER/REPO/... (no blob), branch default to main
-              owner_repo=$(echo "$after_github" | cut -d'/' -f1,2)
-              branch="main"
-              path_in_repo=$(echo "$after_github" | cut -d'/' -f3-)
-            fi
-
-            if [ -z "$owner_repo" ] || [ -z "$path_in_repo" ]; then
-              echo "Failed to parse owner/repo/path from URL: $url"
-              exit 1
-            fi
-
-            owner=$(echo "$owner_repo" | cut -d'/' -f1)
-            repo=$(echo "$owner_repo" | cut -d'/' -f2)
-
-            clone_dir="${WORKDIR}/${owner}_${repo}_${idx}"
-            echo "Cloning repo ${owner}/${repo} (branch: ${branch}) into ${clone_dir}"
-            rm -rf "${clone_dir}"
-            git clone --depth 1 --single-branch --branch "${branch}" "https://github.com/${owner}/${repo}.git" "${clone_dir}" || {
-              echo "Clone failed (trying default branch 'main')..."
-              git clone --depth 1 "https://github.com/${owner}/${repo}.git" "${clone_dir}"
-            }
-
-            # Determine Dockerfile location and build context
-            dockerfile_rel="${path_in_repo}"
-            dockerfile_abs="${clone_dir}/${dockerfile_rel}"
-            if [ ! -f "${dockerfile_abs}" ]; then
-              echo "Dockerfile not found at ${dockerfile_abs} — aborting."
-              exit 1
-            fi
-
-            # Build context = dir that contains the Dockerfile
-            context_dir=$(dirname "${dockerfile_abs}")
-            df_basename=$(basename "${dockerfile_abs}")
-
-            echo "Dockerfile path: ${dockerfile_abs}"
-            echo "Build context: ${context_dir}"
-            echo "Using Dockerfile name: ${df_basename}"
-
-            # If registry is docker.io and tag does not include a registry, keep tag
-            # If using ghcr.io or custom registry user should include it in tag
-            echo "Building and pushing ${tag} ..."
-
-            # Use buildx action via CLI (buildx is set up by earlier action)
-            docker buildx build \
-              --platform linux/amd64 \
-              --push \
-              --tag "${tag}" \
-              --file "${dockerfile_abs}" \
-              "${context_dir}"
-
-            echo "Finished build for ${tag}"
-
-            idx=$((idx+1))
+            # add JSON object
+            item=$(jq -n --arg path "$p" --arg image "$img" '{path:$path, image:$image}')
+            matrix_items+=("$item")
           done
 
-          echo "All builds completed."
+          # join into JSON array
+          matrix_json=$(jq -s '. | map(.)' <<< "${matrix_items[@]}")
+          # set matrix output
+          echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+          echo "matrix prepared: $matrix_json"
+
+      - name: Upload repo as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-src
+          path: ${{ env.CLONE_DIR }}
+
+  build-and-push:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # parse matrix JSON produced by prepare job
+        include: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Download repo artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: repo-src
+          path: repo-src
+
+      - name: Set up QEMU (for multi-arch, optional)
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ github.event.inputs.registry }}
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASS }}
+
+      - name: Build and push image (for ${{ matrix.path }})
+        uses: docker/build-push-action@v5
+        with:
+          context: repo-src/${{ matrix.path }}
+          # this will find Dockerfile in the folder; customize `file` if your Dockerfile name differs
+          push: true
+          tags: ${{ matrix.image }}
+          # optionally set platforms: linux/amd64,linux/arm64
+          # platforms: linux/amd64
+          # cache-from/cache-to can be configured if you have a registry cache
+
+      - name: Show pushed image
+        run: echo "Pushed ${{ matrix.image }}"
