@@ -1,16 +1,23 @@
-name: Build & Push Docker Images
+name: Build & Push Docker Images (External Repo)
 
 on:
   workflow_dispatch:
     inputs:
-      paths:
-        description: "Folders containing Dockerfiles (space or newline separated)"
+      source_repo:
+        description: "GitHub repo that contains the Dockerfiles (org/name)"
         required: true
-        default: "backend frontend"
-      images:
-        description: "Docker image names/tags (same order as paths)"
+      source_ref:
+        description: "Branch / tag / commit"
+        required: false
+        default: "main"
+      docker_paths:
+        description: "Folders containing Dockerfiles (space OR newline separated)"
         required: true
-        default: "hasmo/backend:latest hasmo/frontend:latest"
+        example: "backend frontend"
+      docker_images:
+        description: "Docker image names (same order as paths)"
+        required: true
+        example: "hasmo/backend:test hasmo/frontend:test"
       registry:
         description: "Docker registry"
         required: false
@@ -20,67 +27,87 @@ jobs:
   prepare-matrix:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source repo
         uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.source_repo }}
+          ref: ${{ github.event.inputs.source_ref }}
+          path: repo-src
 
-      - name: Build matrix from inputs
-        id: set-matrix
+      - name: Build matrix
+        id: matrix
         shell: bash
         env:
-          INPUT_PATHS: ${{ github.event.inputs.paths }}
-          INPUT_IMAGES: ${{ github.event.inputs.images }}
+          INPUT_PATHS: ${{ github.event.inputs.docker_paths }}
+          INPUT_IMAGES: ${{ github.event.inputs.docker_images }}
           REGISTRY: ${{ github.event.inputs.registry }}
-          CLONE_DIR: .
+          CLONE_DIR: repo-src
         run: |
           set -euo pipefail
 
           normalize_list() {
             local raw="$1"
             raw="${raw//$'\r'/}"
-            printf '%s' "$raw" | awk '{$1=$1; print}' | tr ' ' '\n' | sed '/^[[:space:]]*$/d'
+            printf '%s\n' "$raw" | tr -s '[:space:]' '\n' | sed '/^$/d'
           }
 
-          PATH_LINES_RAW="$(normalize_list "$INPUT_PATHS")"
-          IMAGE_LINES_RAW="$(normalize_list "$INPUT_IMAGES")"
+          mapfile -t PATHS < <(normalize_list "$INPUT_PATHS")
+          mapfile -t IMAGES < <(normalize_list "$INPUT_IMAGES")
 
-          clean_paths=()
-          while IFS= read -r p; do
-            p="${p%/}"
-            clean_paths+=( "$p" )
-          done <<< "$PATH_LINES_RAW"
-
-          clean_images=()
-          while IFS= read -r img; do
-            clean_images+=( "$img" )
-          done <<< "$IMAGE_LINES_RAW"
-
-          if [ "${#clean_paths[@]}" -ne "${#clean_images[@]}" ]; then
+          if [ "${#PATHS[@]}" -ne "${#IMAGES[@]}" ]; then
             echo "Paths and images count mismatch"
             exit 1
           fi
 
-          matrix_items=()
-          for i in "${!clean_paths[@]}"; do
-            p="${clean_paths[$i]}"
-            img="${clean_images[$i]}"
+          items=()
+          for i in "${!PATHS[@]}"; do
+            path="${PATHS[$i]%/}"
+            image="${IMAGES[$i]}"
 
-            if [ ! -f "$CLONE_DIR/$p/Dockerfile" ]; then
-              echo "Dockerfile not found in $p"
+            if [ ! -d "$CLONE_DIR/$path" ]; then
+              echo "Directory not found: $CLONE_DIR/$path"
               exit 1
             fi
 
-            if [[ "$img" != */* ]]; then
-              img="${REGISTRY%/}/$img"
-            fi
-
-            matrix_items+=( "$(jq -n --arg path "$p" --arg image "$img" '{path:$path, image:$image}')" )
+            items+=( "$(jq -n --arg p "$path" --arg i "$image" '{path:$p,image:$i}')" )
           done
 
-          matrix_json="$(printf '%s\n' "${matrix_items[@]}" | jq -s '.')"
+          matrix_json="$(printf '%s\n' "${items[@]}" | jq -s '.')"
 
           echo "matrix<<EOF" >> "$GITHUB_OUTPUT"
           echo "$matrix_json" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_O_
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.source_repo }}
+          ref: ${{ github.event.inputs.source_ref }}
+          path: repo-src
+
+      - name: Login to Docker registry
+        run: |
+          echo "${{ secrets.DOCKER_PASS }}" | docker login \
+            -u "${{ secrets.DOCKER_USER }}" \
+            --password-stdin
+
+      - name: Build image
+        run: |
+          docker build \
+            -t "${{ matrix.image }}" \
+            repo-src/${{ matrix.path }}
+
+      - name: Push image
+        run: |
+          docker push "${{ matrix.image }}"
