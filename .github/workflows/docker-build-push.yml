@@ -1,120 +1,64 @@
-name: Build & Push Dockerfiles
+name: Build & Push Docker Images
 
 on:
   workflow_dispatch:
     inputs:
-      repo_url:
-        description: 'Git repo URL (HTTPS). Example: https://github.com/owner/repo.git'
-        required: true
-      repo_token:
-        description: '(optional) Token to access private repo (leave empty for public repos)'
-        required: false
-      registry:
-        description: 'Docker registry host (optional). Example: docker.io or ghcr.io'
-        required: false
-        default: 'docker.io'
       paths:
-        description: |
-          List of folders (space OR newline separated) relative to repo root that contain Dockerfile(s).
-          Examples (space-separated): "backend frontend"
-          Examples (newline-separated):
-          backend
-          frontend
+        description: "Folders containing Dockerfiles (space or newline separated)"
         required: true
+        default: "backend frontend"
       images:
-        description: |
-          List of image names (space OR newline separated) that correspond to each path.
-          Include tags. Examples:
-          hasmo/backend:staging hasmo/frontend:staging
-          or
-          hasmo/backend:staging
-          hasmo/frontend:staging
+        description: "Docker image names/tags (same order as paths)"
         required: true
-
-env:
-  CLONE_DIR: repo-src
+        default: "hasmo/backend:latest hasmo/frontend:latest"
+      registry:
+        description: "Docker registry"
+        required: false
+        default: "docker.io"
 
 jobs:
-  prepare:
+  prepare-matrix:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+
     steps:
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq git
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Clone target repo
-        id: clone
-        run: |
-          set -euo pipefail
-          REPO_URL="${{ github.event.inputs.repo_url }}"
-          if [ -n "${{ github.event.inputs.repo_token }}" ]; then
-            # inject token for private repo clones (repo_token should be provided via workflow_dispatch input when needed)
-            REPO_URL="${REPO_URL/https:\/\//https:\/\/${{ github.event.inputs.repo_token }}@}"
-          fi
-          echo "Cloning $REPO_URL into $CLONE_DIR"
-          rm -rf "$CLONE_DIR"
-          git clone --depth 1 "$REPO_URL" "$CLONE_DIR"
-          echo "Cloned."
-
-      - name: Build matrix JSON from inputs 
+      - name: Build matrix from inputs
         id: set-matrix
         shell: bash
         env:
-          CLONE_DIR: ${{ env.CLONE_DIR }}
           INPUT_PATHS: ${{ github.event.inputs.paths }}
           INPUT_IMAGES: ${{ github.event.inputs.images }}
           REGISTRY: ${{ github.event.inputs.registry }}
+          CLONE_DIR: .
         run: |
           set -euo pipefail
-
-          INPUT_PATHS="${INPUT_PATHS:-}"
-          INPUT_IMAGES="${INPUT_IMAGES:-}"
-          REGISTRY="${REGISTRY:-docker.io}"
-          CLONE_DIR="${CLONE_DIR:-repo-src}"
 
           normalize_list() {
             local raw="$1"
             raw="${raw//$'\r'/}"
-            if printf '%s' "$raw" | grep -q $'\n'; then
-              printf '%s\n' "$raw" | sed '/^[[:space:]]*$/d'
-            else
-              printf '%s\n' "$raw" | tr -s '[:space:]' '\n' | sed '/^[[:space:]]*$/d'
-            fi
+            printf '%s' "$raw" | awk '{$1=$1; print}' | tr ' ' '\n' | sed '/^[[:space:]]*$/d'
           }
 
           PATH_LINES_RAW="$(normalize_list "$INPUT_PATHS")"
           IMAGE_LINES_RAW="$(normalize_list "$INPUT_IMAGES")"
 
-          # read into arrays
-          mapfile -t PATH_LINES <<< "$PATH_LINES_RAW" || true
-          mapfile -t IMAGE_LINES <<< "$IMAGE_LINES_RAW" || true
-
-          trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' <<< "$1"; }
-
           clean_paths=()
-          for p in "${PATH_LINES[@]}"; do
-            p="$(trim "$p")"
-            [ -z "$p" ] && continue
+          while IFS= read -r p; do
             p="${p%/}"
-            clean_paths+=("$p")
-          done
+            clean_paths+=( "$p" )
+          done <<< "$PATH_LINES_RAW"
 
           clean_images=()
-          for img in "${IMAGE_LINES[@]}"; do
-            img="$(trim "$img")"
-            [ -z "$img" ] && continue
-            clean_images+=("$img")
-          done
+          while IFS= read -r img; do
+            clean_images+=( "$img" )
+          done <<< "$IMAGE_LINES_RAW"
 
           if [ "${#clean_paths[@]}" -ne "${#clean_images[@]}" ]; then
-            echo "Error: number of paths (${#clean_paths[@]}) and images (${#clean_images[@]}) must match"
-            echo "Paths:"
-            printf ' - %s\n' "${clean_paths[@]}"
-            echo "Images:"
-            printf ' - %s\n' "${clean_images[@]}"
+            echo "Paths and images count mismatch"
             exit 1
           fi
 
@@ -123,71 +67,20 @@ jobs:
             p="${clean_paths[$i]}"
             img="${clean_images[$i]}"
 
-            if [ ! -d "$CLONE_DIR/$p" ]; then
-              echo "Error: path '$p' does not exist in cloned repo ($CLONE_DIR)"
-              echo "Listing $CLONE_DIR:"
-              ls -la "$CLONE_DIR" | sed -n '1,200p'
+            if [ ! -f "$CLONE_DIR/$p/Dockerfile" ]; then
+              echo "Dockerfile not found in $p"
               exit 1
             fi
 
             if [[ "$img" != */* ]]; then
-              reg="${REGISTRY%/}"
-              img="${reg}/${img}"
+              img="${REGISTRY%/}/$img"
             fi
 
-            item=$(jq -n --arg path "$p" --arg image "$img" '{path:$path, image:$image}')
-            matrix_items+=("$item")
+            matrix_items+=( "$(jq -n --arg path "$p" --arg image "$img" '{path:$path, image:$image}')" )
           done
 
           matrix_json="$(printf '%s\n' "${matrix_items[@]}" | jq -s '.')"
 
-          # write multiline matrix to GITHUB_OUTPUT using heredoc
           echo "matrix<<EOF" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$matrix_json" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-          echo "matrix prepared: $matrix_json"
-
-      - name: Upload repo as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: repo-src
-          path: ${{ env.CLONE_DIR }}
-
-  build-and-push:
-    needs: prepare
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.prepare.outputs.matrix) }}
-    steps:
-      - name: Download repo artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: repo-src
-          path: repo-src
-
-      - name: Set up QEMU (optional - multi-arch)
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Login to Docker registry
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ github.event.inputs.registry }}
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_PASS }}
-
-      - name: Build and push image (for ${{ matrix.path }})
-        uses: docker/build-push-action@v5
-        with:
-          context: repo-src/${{ matrix.path }}
-          push: true
-          tags: ${{ matrix.image }}
-          # platforms: linux/amd64,linux/arm64    # uncomment to enable multi-arch
-
-      - name: Show pushed image
-        run: echo "Pushed ${{ matrix.image }}"
+          echo "$matrix_json" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_O_
