@@ -1,4 +1,4 @@
-name: Build & Push Docker Images (External Repo)
+name: Build & Push Docker Images
 
 on:
   workflow_dispatch:
@@ -13,11 +13,9 @@ on:
       docker_paths:
         description: "Folders containing Dockerfiles (space OR newline separated)"
         required: true
-        example: "backend frontend"
       docker_images:
         description: "Docker image names (same order as paths)"
         required: true
-        example: "hasmo/backend:test hasmo/frontend:test"
       registry:
         description: "Docker registry"
         required: false
@@ -30,11 +28,12 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
-      - name: Checkout source repo
+      - name: Checkout source repo (private-safe)
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.inputs.source_repo }}
           ref: ${{ github.event.inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
           path: repo-src
 
       - name: Build matrix
@@ -43,7 +42,6 @@ jobs:
         env:
           INPUT_PATHS: ${{ github.event.inputs.docker_paths }}
           INPUT_IMAGES: ${{ github.event.inputs.docker_images }}
-          REGISTRY: ${{ github.event.inputs.registry }}
           CLONE_DIR: repo-src
         run: |
           set -euo pipefail
@@ -67,10 +65,7 @@ jobs:
             path="${PATHS[$i]%/}"
             image="${IMAGES[$i]}"
 
-            if [ ! -d "$CLONE_DIR/$path" ]; then
-              echo "Directory not found: $CLONE_DIR/$path"
-              exit 1
-            fi
+            [ -d "$CLONE_DIR/$path" ] || { echo "Missing $path"; exit 1; }
 
             items+=( "$(jq -n --arg p "$path" --arg i "$image" '{path:$p,image:$i}')" )
           done
@@ -89,11 +84,12 @@ jobs:
         include: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
 
     steps:
-      - name: Checkout source repo
+      - name: Checkout source repo (private-safe)
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.inputs.source_repo }}
           ref: ${{ github.event.inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
           path: repo-src
 
       - name: Login to Docker registry
