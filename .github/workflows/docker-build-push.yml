@@ -47,9 +47,7 @@ jobs:
         env:
           INPUT_PATHS: ${{ github.event.inputs.docker_paths }}
           INPUT_IMAGES: ${{ github.event.inputs.docker_images }}
-          REGISTRY: ${{ github.event.inputs.registry }}
           CLONE_DIR: repo-src
-          DOCKER_USER: ${{ secrets.DOCKER_USER }}
         run: |
           set -euo pipefail
 
@@ -77,11 +75,7 @@ jobs:
               exit 1
             fi
 
-            # Automatically prefix with DOCKER_USER if not present
-            if [[ "$image" != */* ]]; then
-              image="${DOCKER_USER}/${image}"
-            fi
-
+            # Only include image tag (no secrets)
             items+=( "$(jq -n --arg p "$path" --arg i "$image" '{path:$p,image:$i}')" )
           done
 
@@ -91,6 +85,8 @@ jobs:
           echo "matrix<<EOF" >> "$GITHUB_OUTPUT"
           echo "$matrix_json" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
+
+          echo "matrix prepared: $matrix_json"
 
   build-and-push:
     needs: prepare-matrix
@@ -115,10 +111,13 @@ jobs:
 
       - name: Build image
         run: |
-          echo "Building image ${{ matrix.image }} from repo-src/${{ matrix.path }}"
-          docker build -t "${{ matrix.image }}" "repo-src/${{ matrix.path }}"
+          # Prepend DOCKER_USER if not already included
+          FULL_IMAGE="${{ secrets.DOCKER_USER }}/${{ matrix.image }}"
+          echo "Building image $FULL_IMAGE from repo-src/${{ matrix.path }}"
+          docker build -t "$FULL_IMAGE" "repo-src/${{ matrix.path }}"
 
       - name: Push image
         run: |
-          echo "Pushing image ${{ matrix.image }}"
-          docker push "${{ matrix.image }}"
+          FULL_IMAGE="${{ secrets.DOCKER_USER }}/${{ matrix.image }}"
+          echo "Pushing image $FULL_IMAGE"
+          docker push "$FULL_IMAGE"
